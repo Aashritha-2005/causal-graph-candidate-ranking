@@ -145,6 +145,17 @@ redrob_signals:
 - Honeypot rate in top 100 must stay ≤ 10% or disqualified at Stage 3
 - Build `plausibility_score` as a real feature (not a hardcoded filter)
 
+**Honeypot position tracking — must re-verify after every scoring revision:**
+
+| Checkpoint | Scorer | Detectable in top 100 | All top-100 plaus ≥ 0.8? | Measured? |
+|---|---|---|---|---|
+| Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ measured |
+| Day 2 | embedding cosine sim | — | — | ❌ not yet |
+| Days 3-4 | OT + disqualifier-penalty | — | — | ❌ not yet |
+| Day 5 | + conformal calibration | — | — | ❌ not yet |
+
+Re-verification procedure: after each scoring change, run the check in `scripts/check_honeypots.py` (to be created Day 2), log the result in this table. The "~35 undetectable" honeypots cannot be tracked individually — only their proxy (plausibility < 0.8) can be checked. A clean plausibility check does not guarantee the undetectable ~35 are absent from top 100; it only guarantees the structured-signal ones are not.
+
 ---
 
 ## Known Risks & Open Questions
