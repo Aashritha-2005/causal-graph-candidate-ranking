@@ -47,17 +47,19 @@ See `ARCHITECTURE.md` for full design.
 
 ## Current Phase
 
-**Day 1 — Setup + MVP scaffold**
+**Day 1 — COMPLETE**
 - [x] PROJECT.md created
-- [ ] ARCHITECTURE.md written and approved
-- [ ] Repo scaffolded (src/, tests/, requirements.txt, rank.py)
-- [ ] tests/test_no_keyword_stuffing.py written
-- [ ] Parser + feature table built
-- [ ] Sentence-transformer embeddings precomputed (offline)
-- [ ] Fast retrieval shortlist (FAISS)
-- [ ] Weighted-feature scoring (MVP, no OT/causal/conformal)
-- [ ] Template reasoning generation
-- [ ] validate_submission.py passes
+- [x] ARCHITECTURE.md written and approved (with corrections before code)
+- [x] Repo scaffolded (src/, tests/, requirements.txt, rank.py, conftest.py)
+- [x] tests/test_no_keyword_stuffing.py written and passes (sample failure mode confirmed caught)
+- [x] tests/test_output_format.py written — 9 structural checks, all pass
+- [x] Parser (src/parse.py) — 47-column feature table over 100K candidates in 38s
+- [x] MVP weighted scoring (src/score_mvp.py) — no OT/disqualifier-penalty yet
+- [x] Template reasoning (src/reasoning.py) — zero LLM calls, zero hallucination
+- [x] rank.py end-to-end: 8s wall-clock, validate_submission.py PASS
+- [x] Top 100 quality check: all ML/AI titles, zero honeypots, zero IT-services-only, zero non-AI titles
+
+**Next: Day 2 — Sentence-transformer embeddings + FAISS shortlist (replaces domain_score in MVP)**
 
 ---
 
@@ -174,6 +176,14 @@ redrob_signals:
 ---
 
 ## Running Changelog
+
+### 2026-06-28 — Day 1 complete
+- Full MVP pipeline working end-to-end: parse → score → reasoning → CSV
+- rank.py: 8s wall-clock (5min budget). validate_submission.py PASS. 11/11 tests pass.
+- Top 100: all ML/AI professionals, zero IT-services-only, zero honeypots, plausibility all ≥ 0.8
+- MVP domain_score is title+skill heuristic (no embeddings yet). Day 2 adds sentence-transformer cosine sim to replace/augment domain_score.
+- Commit df4a0b6 (initial) + format test fix added.
+- What's still open: embedding precompute (scripts/precompute.py + src/embed.py + src/index.py), FAISS shortlist integration into scorer.
 
 ### 2026-06-28 — Pre-Day-1 Verifications (post-approval)
 - Ran all three data verifications required before scoring code.
