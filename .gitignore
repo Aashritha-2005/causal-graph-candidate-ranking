@@ -1,0 +1,24 @@
+# Raw hackathon data — not committed, organizers supply this directly at reproduction time
+India_runs_data_and_ai_challenge/candidates.jsonl
+India_runs_data_and_ai_challenge/candidates.jsonl.gz
+
+# Large precomputed artifacts — regenerate via the precompute script, don't commit
+artifacts/*.npy
+artifacts/*.faiss
+artifacts/*.index
+artifacts/*.pkl
+artifacts/*embeddings*
+artifacts/*.parquet
+artifacts/*.bin
+
+# Standard Python / env junk
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+
+# Local outputs / scratch
+outputs/*.csv
+notebooks/.ipynb_checkpoints/
