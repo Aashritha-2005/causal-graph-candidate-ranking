@@ -145,16 +145,47 @@ redrob_signals:
 - Honeypot rate in top 100 must stay ≤ 10% or disqualified at Stage 3
 - Build `plausibility_score` as a real feature (not a hardcoded filter)
 
+**Why Day 1 honeypots rank low — measured mechanism, not just a claim:**
+
+`domain_score` for the 43 detectable honeypots: mean=0.225, median=0.137, max=0.833.
+`domain_score` for the top 100 candidates: mean=0.816, median=0.817, min=0.707.
+
+The separation is driven by `_title_score`: most honeypots have non-AI titles (HR Manager,
+Marketing Manager, Accountant, Civil Engineer, etc.) which score 0.06–0.10. The highest-
+scoring honeypots are the two with ML-adjacent titles (CAND_0019480 "NLP Engineer"
+raw_score=0.698, CAND_0093547 "Senior ML Engineer" raw_score=0.669) — these are close
+to the top-100 cut (min raw_score ≈ 0.780 after normalization). The plausibility penalty
+(×0.4 exponent) suppresses them: 0.793^0.4 ≈ 0.913, 0.864^0.4 ≈ 0.943 — helpful but
+not what's doing the heavy lifting. `domain_score` (title heuristic) is.
+
+**Risk for Day 2:** semantic embeddings may score "NLP Engineer" honeypots differently
+from the title heuristic — the JD text is rich in NLP/ML language, so a honeypot with
+an ML title and fabricated skills could get a high cosine similarity even with low
+plausibility. The two highest-scoring detectable honeypots are the exact ones to watch.
+
 **Honeypot position tracking — must re-verify after every scoring revision:**
 
-| Checkpoint | Scorer | Detectable in top 100 | All top-100 plaus ≥ 0.8? | Measured? |
-|---|---|---|---|---|
-| Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ measured |
-| Day 2 | embedding cosine sim | — | — | ❌ not yet |
-| Days 3-4 | OT + disqualifier-penalty | — | — | ❌ not yet |
-| Day 5 | + conformal calibration | — | — | ❌ not yet |
+| Checkpoint | Scorer | Detectable in top 100 | Top-100 plaus ≥ 0.8? | Measured? | Notes |
+|---|---|---|---|---|---|
+| Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ | Mechanism: title_score separation; highest-risk HP raw_scores 0.67–0.70 vs top-100 min ≈ 0.78 |
+| Day 2 | embedding cosine sim | — | — | ❌ | Run check_honeypots.py after embedding integration |
+| Days 3-4 | OT + disqualifier-penalty | — | — | ❌ | Run again |
+| Day 5 | + conformal calibration | — | — | ❌ | Run again |
 
-Re-verification procedure: after each scoring change, run the check in `scripts/check_honeypots.py` (to be created Day 2), log the result in this table. The "~35 undetectable" honeypots cannot be tracked individually — only their proxy (plausibility < 0.8) can be checked. A clean plausibility check does not guarantee the undetectable ~35 are absent from top 100; it only guarantees the structured-signal ones are not.
+Re-verification command: `python scripts/check_honeypots.py --sub submission.csv`
+
+**On the ~35 "undetectable" gap — no ground truth available locally:**
+
+The ~80 figure comes solely from `submission_spec.docx` Section 7: *"a small number (~80)
+of honeypot candidates."* No count, no list, no labeled field exists in the bundle — there
+is no `is_honeypot` field in the schema, no separate file, no validator output. The hidden
+ground truth is server-side only.
+
+Structured signals catch 43. The remaining gap (~37) is an estimate derived by subtraction
+from an approximate spec figure. It is **not a measured count**. The tracking table entry
+"~35 undetectable" should be read as: *estimated gap, true count and identities
+unverifiable locally*. A clean `plausibility ≥ 0.8` check covers only what structured
+signals can see.
 
 ---
 
