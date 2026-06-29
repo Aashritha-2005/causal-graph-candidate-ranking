@@ -65,14 +65,17 @@
 │       ▼                                                                    │
 │  [3] DISQUALIFIER-PENALTY SCORING (Days 3-4)                             │
 │       │  For each shortlist candidate, compute 8 disqualifier penalties:  │
-│       │  D1: pure_research_flag (no production role in career history)   │
-│       │  D2: llm_only_ai_flag (AI experience < 12mo, no pre-LLM ML)     │
+│       │  [D1 DROPPED: 0 detections in dataset — no research/academia      │
+│       │   industry exists; text heuristic fires on nobody. Non-applicable]│
+│       │  [D2 DROPPED: 0 detections — only 64 candidates mention LLM      │
+│       │   keywords at all; none without pre-LLM hits. Non-applicable]    │
 │       │  D3: no_prod_code_18mo (senior title, last 18mo = arch only)     │
-│       │  D4: title_chaser_flag (Staff/Principal hops < 1.5yr intervals)  │
-│       │  D5: framework_enthusiast (github low + tutorial-only signals)   │
+│       │  D4→frequent_job_hopper (>50% roles <18mo, ≥4 roles — STRUCTURAL)│
+│       │     Proxy for title-chasing; 1,382 flagged, 9 are ML/AI titles   │
+│       │  D5: framework_enthusiast (github_activity_score low)            │
 │       │  D6: pure_services_flag (all career = TCS/Infosys/Wipro/... )    │
 │       │  D7: cv_speech_robotics_no_nlp (primary domain mismatch)         │
-│       │  D8: closed_source_only_5yr (no papers/talks/OSS)                │
+│       │  D8: closed_source_only_5yr (no github + large enterprise only)  │
 │       │                                                                    │
 │       │  Disqualifier-penalty smoothing (NOT "causal debiasing"):        │
 │       │  - Logistic regression fits P(flag=1 | structured features)      │
@@ -241,10 +244,10 @@ Method:
 3. Final score multiplied by product of (1 - P(Di)) for each Di
 
 Signal sources per flag:
-- **D1** (pure research): check career_history industry/company_size — no product-company role → flag. Structured field, reliable.
-- **D2** (LLM-only AI): career tenure in ML roles (titles) + total AI experience months. Partially text-dependent for "pre-LLM-era" signal — heuristic, approximate.
+- **D1 DROPPED**: text heuristic fires on 0 candidates; no "research/academia" industry exists in this dataset. Non-applicable to this dataset.
+- **D2 DROPPED**: 64/100K candidates mention any LangChain keyword; zero have LLM hits without pre-LLM hits. Non-applicable.
 - **D3** (no prod code 18mo): current role title pattern (arch/lead/principal) + duration_months in current role. Structured.
-- **D4** (title-chaser): sorted career_history, check title elevation (Junior→Senior→Staff) with duration_months < 18. Structured field, reliable.
+- **D4 → `frequent_job_hopper`**: >50% of roles have duration_months < 18 AND ≥ 4 total roles. Purely structural (duration_months field). 1,382 flagged: 1,373 non-AI titles (already low-scoring), 9 ML/AI titles (minor false-positive risk). This is a proxy for the JD's title-chaser concern — it detects frequent switching, not title elevation specifically. Documented as proxy.
 - **D5** (framework enthusiast): github_activity_score + career description keyword density. Text-dependent, heuristic.
 - **D6** (pure services): check all companies against known IT-services list. Structured, reliable.
 - **D7** (CV/speech/robotics): current_title + career history industry. Structured, reliable.
@@ -346,7 +349,11 @@ causal-graph-candidate-ranking/
 2. **Plausibility score partial coverage**: structured signals (date-math + proficiency×duration) catch ~43-46 of ~80 expected honeypots. Remaining ~35 are undetectable from structured fields alone. They will naturally rank low due to irrelevant titles/careers — but this is probabilistic, not guaranteed. Do not rely solely on plausibility_score; the full scoring pipeline provides defense-in-depth.
 3. **Conformal calibration without ground truth**: pseudo-labels may introduce bias — keep conformal CI as a secondary modifier, not the primary score driver.
 4. **GNN (Day 6)**: if behind schedule, skip entirely — the OT + disqualifier-penalty system is already architecturally novel.
-5. **D1, D2, D4 text-pattern dependency (must address before Days 3-4):** D1 (pure_research_flag), D2 (llm_only_ai_flag), and D4 (title_chaser_flag) partially depend on regex/keyword matching over free-text `career_history.description`. This is the same keyword-detection mechanism the JD explicitly warns against, just moved upstream into the feature pipeline. It does not break MVP (MVP does not use D1-D8). Before building disqualifier-penalty scoring on Days 3-4, either: (a) re-ground these flags on structured fields only (preferred — career_history has company, industry, title, duration_months as structured columns), or (b) clearly document in README that D1/D2/D4 flags are heuristic approximations, not definitive signals. D3, D6 are structurally grounded and not affected.
+5. ~~**D1, D2, D4 text-pattern dependency**~~ **RESOLVED (Days 3-4 pre-work):** Empirical investigation over all 100K candidates found:
+   - **D1**: text heuristic fires on 0 candidates; structured industry alternative also fires on 0 (no research/academia industry exists in dataset). Dropped — non-applicable.
+   - **D2**: text heuristic fires on 0 candidates (only 64 mention LLM keywords; none without pre-LLM hits). Dropped — non-applicable.
+   - **D4**: was already purely structural in `parse.py` (duration_months + n_roles, no free text used). Renamed `frequent_job_hopper` to accurately describe what it measures (frequent switching, not title elevation). 1,382 flagged; 9 are ML/AI titles (minor false-positive risk, documented).
+   - Net result: disqualifier-penalty scoring will use D3, D4(renamed), D5, D6, D7, D8 only. No text-pattern dependency in any active flag.
 
 ---
 

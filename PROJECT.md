@@ -177,7 +177,7 @@ plausibility. The two highest-scoring detectable honeypots are the exact ones to
 |---|---|---|---|---|---|
 | Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ | Mechanism: title_score separation; highest-risk HP raw_scores 0.67–0.70 vs top-100 min ≈ 0.78 |
 | Day 2 | embedding cosine sim (FAISS k=5000) | **0 / 43** | **Yes** (all = 1.0) | ✅ | Highest-risk HPs: CAND_0093547 cosine_sim=0.70 (stayed out — career+plaus penalty sufficient); CAND_0019480 cosine_sim=0.62 (well clear) |
-| Days 3-4 | OT + disqualifier-penalty | — | — | ❌ | Run again |
+| Days 3-4 | OT (Sinkhorn) + disqualifier-penalty | **0 / 43** | **Yes** (all = 1.0) | ✅ | CAND_0093547: not in top 100; CAND_0019480: not in top 100. Margin vs rank-100 measured. |
 | Day 5 | + conformal calibration | — | — | ❌ | Run again |
 
 Re-verification command: `python scripts/check_honeypots.py --sub submission.csv`
@@ -242,6 +242,32 @@ signals can see.
 - Honeypot detectability: ~43-46 catchable via structured signals (date-math + proficiency×duration); remaining ~35 likely require text or external knowledge. plausibility_score design is sound; won't catch all ~80 but catches the most egregious and naturally-avoids others via low domain-relevance scores.
 - Updated ARCHITECTURE.md: (1) renamed "causal debiasing" to "disqualifier-penalty scoring" to avoid overclaiming; (2) added Known Risk on D1/D2/D4 text-pattern dependency before Days 3-4.
 - What's still open: Day 1 code (test + parser + MVP scorer).
+
+### 2026-06-29 — Days 3-4 complete
+
+**Known Risk #5 resolution (pre-OT requirement):**
+- D1 (`pure_research_flag`): text heuristic fires on 0/100K; structured industry alternative (research/academia) also fires on 0. **DROPPED** — non-applicable to this dataset. No replacement needed.
+- D2 (`llm_only_ai_flag`): text heuristic fires on 0/100K (only 64 have LLM keywords; none without pre-LLM hits). **DROPPED** — non-applicable. No replacement needed.
+- D4 (`title_chaser`): confirmed purely structural in `parse.py` (duration_months + n_roles; no free text used). **Renamed `frequent_job_hopper`** — accurately describes the detection (frequent short stints), not title elevation which was unverifiable. 1,382 flagged; 9 are ML/AI titles (acknowledged false-positive risk). ARCHITECTURE.md and parse.py both updated.
+- Net result: disqualifier-penalty uses D3, D4(renamed), D5, D6, D7, D8. Zero text-pattern dependency in any active flag.
+
+**Days 3-4 implementation:**
+- `src/ot_matching.py`: Sinkhorn OT matching, candidate skill distribution vs JD 12-skill matrix. Skill embeddings built from `all-MiniLM-L6-v2` over shortlist unique skill names at ranking time.
+- `src/disqualifier.py`: compound soft-penalty multiplier over D3/D4/D5/D6/D7/D8 flags (all structural). Penalties range from 0.25 (D6 pure-services, strong) to 0.92 (D8 closed-source, mild).
+- `src/score_mvp.py`: updated weights: W_SEM=0.35, W_OT=0.10, W_CAREER=0.30, W_AVAIL=0.15, W_LOC=0.10.
+- `rank.py`: wired OT and disqualifier into ranking pipeline as steps 3 and 4.
+- parse.py: `_heuristic_flags()` replaced by `_disqualifier_flags()` (structural only). Parquet regenerated.
+
+**Honeypot re-verification (step 2 required before OT merge):**
+- `python3 scripts/check_honeypots.py --sub submission.csv` → 0/43 detectable HPs in top 100, 0.0% rate, Stage 3 PASS, all plausibility ≥ 0.8.
+- CAND_0093547: not in top 100 (was cosine_sim=0.70 at Day 2; disqualifier penalty + career score pushed it out).
+- CAND_0019480: not in top 100.
+- Tracking table row updated ✅.
+
+**Performance:** 17.0s total ranking wall-clock (15.6s OT on 5000 shortlist). Well under 5-min budget.
+**Tests:** 11/11 pass.
+
+What's next: Day 5 — conformal calibration, availability modifier tuning, final honeypot re-check before submission.
 
 ### 2026-06-28 — Step 0
 - Created PROJECT.md after reading all bundle files (docx via python-docx, schema, sample candidates, sample submission, validator)

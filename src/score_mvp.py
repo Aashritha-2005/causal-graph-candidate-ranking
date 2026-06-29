@@ -23,9 +23,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# ---------- weights (Day 2 with embeddings) ----------
-W_SEM       = 0.40   # semantic cosine sim to JD (replaces title heuristic)
-W_CAREER    = 0.35   # product company months, ML/AI years, structured signals
+# ---------- weights (Days 3-4 with OT + disqualifier penalties) ----------
+W_SEM       = 0.35   # semantic cosine sim to JD (sentence-transformer)
+W_OT        = 0.10   # OT/Sinkhorn skill distribution match (new Day 3-4)
+W_CAREER    = 0.30   # product company months, ML/AI years, structured signals
 W_AVAIL     = 0.15   # redrob availability signals
 W_LOC       = 0.10   # location fit
 PLAUS_EXP   = 0.40   # plausibility penalty exponent
@@ -142,8 +143,8 @@ def _career_score(row: pd.Series) -> float:
     ml_score = min(1.0, ml_months / 48)  # target: 4 years
     score += 0.30 * ml_score
 
-    # Title-chaser penalty (D4 — structured field, reliable)
-    if row["d4_title_chaser"]:
+    # Frequent job-hopper penalty (D4 renamed — structural, >50% roles <18mo)
+    if row["d4_frequent_job_hopper"]:
         score *= 0.7
 
     # No-prod-code-18mo penalty (D3)
@@ -162,20 +163,31 @@ def _career_score(row: pd.Series) -> float:
     return min(1.0, score)
 
 
-def compute_scores(df: pd.DataFrame, cosine_sim: np.ndarray | None = None) -> pd.Series:
+def compute_scores(
+    df: pd.DataFrame,
+    cosine_sim: np.ndarray | None = None,
+    ot_scores: np.ndarray | None = None,
+    disq_multiplier: np.ndarray | None = None,
+) -> pd.Series:
     """
-    Vectorized MVP composite score for all candidates.
+    Vectorized composite score (Days 3-4).
 
-    cosine_sim: precomputed float32 array of shape (len(df),) — cosine similarity
-                to the JD embedding for each candidate, aligned to df.index order.
-                If None, falls back to title-heuristic domain_score.
-
-    Returns a Series aligned to df.index.
+    cosine_sim      : (len(df),) float32 — cosine sim to JD embedding. If None, uses domain_score.
+    ot_scores       : (len(df),) float32 — Sinkhorn OT score. If None, W_OT weight collapses to W_SEM.
+    disq_multiplier : (len(df),) float32 — compound penalty in (0, 1]. If None, no penalty applied.
     """
     if cosine_sim is not None:
         sem = pd.Series(cosine_sim, index=df.index).clip(0, 1)
     else:
         sem = df.apply(_domain_score, axis=1)
+
+    if ot_scores is not None:
+        ot = pd.Series(ot_scores, index=df.index).clip(0, 1)
+        w_sem_eff, w_ot_eff = W_SEM, W_OT
+    else:
+        ot = pd.Series(np.zeros(len(df), dtype=np.float32), index=df.index)
+        # redistribute OT weight to SEM when OT unavailable
+        w_sem_eff, w_ot_eff = W_SEM + W_OT, 0.0
 
     career  = df.apply(_career_score, axis=1)
     avail   = df["availability_score"]
@@ -183,23 +195,37 @@ def compute_scores(df: pd.DataFrame, cosine_sim: np.ndarray | None = None) -> pd
     plaus   = df["plausibility_score"]
 
     raw = (
-        W_SEM    * sem
-        + W_CAREER * career
-        + W_AVAIL  * avail
-        + W_LOC    * loc
+        w_sem_eff * sem
+        + w_ot_eff * ot
+        + W_CAREER  * career
+        + W_AVAIL   * avail
+        + W_LOC     * loc
     )
 
     score = raw * (plaus ** PLAUS_EXP)
+
+    if disq_multiplier is not None:
+        disq = pd.Series(disq_multiplier, index=df.index)
+        score = score * disq
+
     return score.round(6)
 
 
-def rank_candidates(df: pd.DataFrame, cosine_sim: np.ndarray | None = None, top_n: int = 100) -> pd.DataFrame:
+def rank_candidates(
+    df: pd.DataFrame,
+    cosine_sim: np.ndarray | None = None,
+    ot_scores: np.ndarray | None = None,
+    disq_multiplier: np.ndarray | None = None,
+    top_n: int = 100,
+) -> pd.DataFrame:
     """
     Return top_n candidates sorted by score DESC, then candidate_id ASC for ties.
     Scores are normalized to [0, 1] range and made strictly non-increasing per rank.
     """
     df = df.copy()
-    df["_raw_score"] = compute_scores(df, cosine_sim=cosine_sim)
+    df["_raw_score"] = compute_scores(
+        df, cosine_sim=cosine_sim, ot_scores=ot_scores, disq_multiplier=disq_multiplier
+    )
 
     # Sort: score DESC, candidate_id ASC (tie-break per validator spec)
     df_sorted = df.sort_values(["_raw_score", "candidate_id"], ascending=[False, True])

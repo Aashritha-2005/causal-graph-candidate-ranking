@@ -217,17 +217,16 @@ def _career_features(career: list[dict], profile: dict) -> dict:
 
     # D4: title chaser — detect rapid promotions via title hops in short stints
     # Structured: look for Short (<18mo) stints with seniority-jump titles
-    SENIORITY_LEVELS = ["junior", "associate", "mid", "senior", "staff", "principal", "distinguished"]
-    d4_title_chaser = False
-    if len(title_history) >= 3:
-        short_jumps = 0
-        for _, _, dur in title_history:
-            if 0 < dur < 18:
-                short_jumps += 1
-        # If more than half of roles are very short stints → title-chasing pattern
-        d4_title_chaser = short_jumps >= len(title_history) // 2 + 1 and len(title_history) >= 4
+    # D4 → frequent_job_hopper: >50% of roles < 18mo AND ≥ 4 roles.
+    # Purely structural (duration_months field — no free text).
+    # Proxy for the JD's title-chaser concern; measures frequent switching, not
+    # title elevation specifically. Documented as proxy in ARCHITECTURE.md.
+    short_jumps = sum(1 for _, _, dur in title_history if 0 < dur < 18)
+    d4_frequent_job_hopper = (
+        short_jumps >= len(title_history) // 2 + 1 and len(title_history) >= 4
+    )
 
-    # D7: CV/speech/robotics background — structured: current_title and industry
+    # D7: CV/speech/robotics background — structured: current_title only
     d7_cv_speech = any(kw in current_title for kw in CV_SPEECH_ROBOTICS_TITLES)
 
     return {
@@ -237,7 +236,7 @@ def _career_features(career: list[dict], profile: dict) -> dict:
         "ml_ai_months": ml_ai_months,
         "current_role_months": current_role_months,
         "d3_no_prod_code": d3_no_prod_code,
-        "d4_title_chaser": d4_title_chaser,
+        "d4_frequent_job_hopper": d4_frequent_job_hopper,
         "d6_pure_services": d6_pure_services,
         "d7_cv_speech": d7_cv_speech,
     }
@@ -268,51 +267,31 @@ def _skill_features(skills: list[dict]) -> dict:
     }
 
 
-def _heuristic_flags(career: list[dict], sig: dict) -> dict:
+def _disqualifier_flags(sig: dict) -> dict:
     """
-    HEURISTIC text-pattern flags for D1, D2, D5, D8.
-    These depend on career_history.description free text.
-    Documented as approximate in README; not used in MVP scoring.
-    Only activated for Days 3-4 disqualifier-penalty scoring.
+    Remaining disqualifier flags for Days 3-4 penalty scoring.
+    D1 and D2 dropped: empirically fire on 0 candidates in this dataset.
+    All remaining flags are structurally grounded (no free-text regex).
+
+    D5: framework_enthusiast — low github_activity_score (structural signal)
+    D8: closed_source_only — no GitHub linked AND low verification signals
     """
-    all_desc = " ".join(r.get("description", "") for r in career)
-
-    # D1: no production role — heuristic: descriptions mention only research/academic terms
-    research_terms = re.compile(
-        r"\b(research|paper|arxiv|publication|lab|phd|academic|thesis|dissertation)\b",
-        re.IGNORECASE,
-    )
-    prod_terms = re.compile(
-        r"\b(deployed|production|shipped|users|scale|latency|infra|api|service|pipeline"
-        r"|platform|a/b test|rollout|real.time|million|billion)\b",
-        re.IGNORECASE,
-    )
-    research_hits = len(research_terms.findall(all_desc))
-    prod_hits = len(prod_terms.findall(all_desc))
-    d1_pure_research = research_hits > 3 and prod_hits < 2
-
-    # D2: LLM-only AI (HEURISTIC)
-    llm_hits = len(LANGCHAIN_KEYWORDS.findall(all_desc))
-    pre_llm_hits = len(PRE_LLM_ML_KEYWORDS.findall(all_desc))
-    d2_llm_only = llm_hits >= 3 and pre_llm_hits < 2
-
-    # D5: framework enthusiast — low github + high LLM tutorial pattern
     github = float(sig.get("github_activity_score", -1))
-    github_effective = github if github >= 0 else 0.0
-    d5_framework_enthusiast = github_effective < 20 and llm_hits >= 2
 
-    # D8: closed-source only — no github AND large-only companies
+    # D5: github_activity_score < 20 is the structural proxy for "no public code."
+    # Not "framework enthusiast" in the strict JD sense, but the closest structural signal.
+    d5_low_github = github >= 0 and github < 20
+
+    # D8: no GitHub linked (github=-1) AND low identity verification
     d8_closed_source = (
         github < 0
-        and sig.get("linkedin_connected", False) is False
+        and not sig.get("linkedin_connected", False)
         and not sig.get("verified_email", False)
     )
 
     return {
-        "d1_pure_research_heuristic": d1_pure_research,
-        "d2_llm_only_heuristic": d2_llm_only,
-        "d5_framework_enthusiast_heuristic": d5_framework_enthusiast,
-        "d8_closed_source_heuristic": d8_closed_source,
+        "d5_low_github": d5_low_github,
+        "d8_closed_source": d8_closed_source,
     }
 
 
@@ -326,7 +305,7 @@ def parse_candidate(c: dict) -> dict:
     yoe = float(profile.get("years_of_experience", 0))
     career_feats = _career_features(career, profile)
     skill_feats = _skill_features(skills)
-    heuristic = _heuristic_flags(career, sig)
+    disq_flags = _disqualifier_flags(sig)
 
     # Redrob signals
     github = float(sig.get("github_activity_score", -1))
@@ -376,8 +355,8 @@ def parse_candidate(c: dict) -> dict:
         "salary_max_lpa": float(sig.get("expected_salary_range_inr_lpa", {}).get("max", 0)),
         # Education
         "best_edu_tier": best_tier,
-        # Heuristic flags (Days 3-4 only, not used in MVP)
-        **heuristic,
+        # Disqualifier flags for Days 3-4 penalty scoring (all structural)
+        **disq_flags,
         # Raw text for embedding (precompute step uses this)
         "embed_text": (
             f"{profile.get('headline', '')} | "

@@ -18,10 +18,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR   = Path("artifacts")
 FEATURES_PATH   = ARTIFACTS_DIR / "structured_features.parquet"
 EMBEDDINGS_PATH = ARTIFACTS_DIR / "candidate_embeddings.npy"
 JD_EMBED_PATH   = ARTIFACTS_DIR / "jd_embedding.npy"
+JD_SKILLS_PATH  = ARTIFACTS_DIR / "jd_skill_matrix.npy"
 INDEX_PATH      = ARTIFACTS_DIR / "faiss_index.bin"
 
 SHORTLIST_K = 5000
@@ -48,53 +49,94 @@ def main():
     # 1. Load feature table
     # ------------------------------------------------------------------ #
     _ensure_features(args.candidates)
-    print(f"[1/5] Loading feature table...")
+    print(f"[1/6] Loading feature table...")
     df = pd.read_parquet(FEATURES_PATH)
     candidate_ids = df["candidate_id"].tolist()
     print(f"      {len(df):,} candidates  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 2. FAISS shortlist (embedding similarity to JD)
+    # 2. FAISS shortlist
     # ------------------------------------------------------------------ #
-    use_embeddings = EMBEDDINGS_PATH.exists() and JD_EMBED_PATH.exists() and INDEX_PATH.exists()
+    use_embeddings = all(p.exists() for p in [EMBEDDINGS_PATH, JD_EMBED_PATH, INDEX_PATH])
     cosine_sim_full = None
+    shortlist_df = None
 
     if use_embeddings:
-        print(f"[2/5] Loading embeddings and FAISS shortlist (k={SHORTLIST_K})...")
+        print(f"[2/6] FAISS shortlist (k={SHORTLIST_K})...")
         from src.index import load_index, retrieve_shortlist
-
         jd_vec = np.load(JD_EMBED_PATH)
         index  = load_index(INDEX_PATH)
-
         shortlist_df = retrieve_shortlist(index, jd_vec, candidate_ids, k=SHORTLIST_K)
 
-        # Build full cosine_sim array aligned to df (zeros for non-shortlisted)
         sim_map = dict(zip(shortlist_df["candidate_id"], shortlist_df["cosine_sim"]))
         cosine_sim_full = np.array([sim_map.get(cid, 0.0) for cid in candidate_ids], dtype=np.float32)
-        print(f"      Shortlist: {len(shortlist_df):,} candidates  ({time.time()-t0:.1f}s)")
+        print(f"      {len(shortlist_df):,} in shortlist  ({time.time()-t0:.1f}s)")
     else:
-        print(f"[2/5] Embedding artifacts not found — using title heuristic (fallback)")
+        print(f"[2/6] Embedding artifacts missing — using title heuristic fallback")
 
     # ------------------------------------------------------------------ #
-    # 3. Score and rank
+    # 3. Optimal Transport matching (shortlist only)
     # ------------------------------------------------------------------ #
-    print(f"[3/5] Scoring candidates...")
+    ot_score_full = None
+    if JD_SKILLS_PATH.exists() and shortlist_df is not None:
+        print(f"[3/6] OT/Sinkhorn matching on shortlist...")
+        from sentence_transformers import SentenceTransformer
+        from src.ot_matching import build_skill_embedding_cache, compute_ot_scores_from_skill_embeddings
+
+        jd_skills = np.load(JD_SKILLS_PATH)  # (12, 384)
+
+        # Build skill embedding cache for shortlist candidates only
+        shortlist_mask = df["candidate_id"].isin(set(shortlist_df["candidate_id"]))
+        shortlist_feats = df[shortlist_mask].reset_index(drop=True)
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        skill_cache = build_skill_embedding_cache(
+            shortlist_feats["skills_json"].tolist(), model
+        )
+        del model  # free RAM after embedding
+
+        ot_scores_shortlist = compute_ot_scores_from_skill_embeddings(
+            shortlist_feats["skills_json"].tolist(),
+            skill_cache,
+            jd_skills,
+        )
+
+        # Map back to full candidate array
+        ot_map = dict(zip(shortlist_feats["candidate_id"], ot_scores_shortlist))
+        ot_score_full = np.array([ot_map.get(cid, 0.0) for cid in candidate_ids], dtype=np.float32)
+        print(f"      OT done  ({time.time()-t0:.1f}s)")
+    else:
+        print(f"[3/6] OT skipped (JD skill matrix or shortlist missing)")
+
+    # ------------------------------------------------------------------ #
+    # 4. Disqualifier-penalty multipliers
+    # ------------------------------------------------------------------ #
+    print(f"[4/6] Disqualifier penalties...")
+    from src.disqualifier import compute_disqualifier_multiplier
+    disq_mult = compute_disqualifier_multiplier(df)
+    print(f"      Done  ({time.time()-t0:.1f}s)")
+
+    # ------------------------------------------------------------------ #
+    # 5. Composite score and rank
+    # ------------------------------------------------------------------ #
+    print(f"[5/6] Scoring and ranking...")
     from src.score_mvp import rank_candidates
-    ranked = rank_candidates(df, cosine_sim=cosine_sim_full, top_n=args.top_n)
-    print(f"      Top {args.top_n} selected  ({time.time()-t0:.1f}s)")
+    ranked = rank_candidates(
+        df,
+        cosine_sim=cosine_sim_full,
+        ot_scores=ot_score_full,
+        disq_multiplier=disq_mult,
+        top_n=args.top_n,
+    )
 
-    # ------------------------------------------------------------------ #
-    # 4. Template reasoning
-    # ------------------------------------------------------------------ #
-    print(f"[4/5] Generating reasoning...")
     from src.reasoning import add_reasoning_column
     ranked = add_reasoning_column(ranked)
     print(f"      Done  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 5. Write and validate
+    # 6. Write and validate
     # ------------------------------------------------------------------ #
-    print(f"[5/5] Writing {args.out}...")
+    print(f"[6/6] Writing {args.out}...")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out = ranked[["candidate_id", "rank", "score", "reasoning"]]
     out.to_csv(args.out, index=False, encoding="utf-8")
