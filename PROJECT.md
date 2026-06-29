@@ -59,7 +59,15 @@ See `ARCHITECTURE.md` for full design.
 - [x] rank.py end-to-end: 8s wall-clock, validate_submission.py PASS
 - [x] Top 100 quality check: all ML/AI titles, zero honeypots, zero IT-services-only, zero non-AI titles
 
-**Next: Day 2 — Sentence-transformer embeddings + FAISS shortlist (replaces domain_score in MVP)**
+**Day 2 — COMPLETE**
+- [x] src/embed.py — sentence-transformer (all-MiniLM-L6-v2), JD text + skill matrix
+- [x] src/index.py — FAISS IndexFlatIP, shortlist query
+- [x] scripts/precompute.py — end-to-end offline precompute (8.6 min, 350 MB artifacts)
+- [x] rank.py updated — loads FAISS, computes cosine_sim array, 2s ranking step
+- [x] Honeypot re-verified: 0/43 in top 100; both ML-titled honeypots stayed out (cosine_sim 0.70 and 0.62, career+plausibility penalty sufficient)
+- [x] 11/11 tests pass; validate_submission.py PASS
+
+**Next: Days 3-4 — OT matching + disqualifier-penalty scoring**
 
 ---
 
@@ -168,7 +176,7 @@ plausibility. The two highest-scoring detectable honeypots are the exact ones to
 | Checkpoint | Scorer | Detectable in top 100 | Top-100 plaus ≥ 0.8? | Measured? | Notes |
 |---|---|---|---|---|---|
 | Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ | Mechanism: title_score separation; highest-risk HP raw_scores 0.67–0.70 vs top-100 min ≈ 0.78 |
-| Day 2 | embedding cosine sim | — | — | ❌ | Run check_honeypots.py after embedding integration |
+| Day 2 | embedding cosine sim (FAISS k=5000) | **0 / 43** | **Yes** (all = 1.0) | ✅ | Highest-risk HPs: CAND_0093547 cosine_sim=0.70 (stayed out — career+plaus penalty sufficient); CAND_0019480 cosine_sim=0.62 (well clear) |
 | Days 3-4 | OT + disqualifier-penalty | — | — | ❌ | Run again |
 | Day 5 | + conformal calibration | — | — | ❌ | Run again |
 

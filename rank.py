@@ -15,14 +15,19 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ARTIFACTS_DIR = Path("artifacts")
-FEATURES_PATH = ARTIFACTS_DIR / "structured_features.parquet"
+FEATURES_PATH   = ARTIFACTS_DIR / "structured_features.parquet"
+EMBEDDINGS_PATH = ARTIFACTS_DIR / "candidate_embeddings.npy"
+JD_EMBED_PATH   = ARTIFACTS_DIR / "jd_embedding.npy"
+INDEX_PATH      = ARTIFACTS_DIR / "faiss_index.bin"
+
+SHORTLIST_K = 5000
 
 
-def _ensure_artifacts(candidates_path: Path):
-    """Auto-generate feature table if not present (first-run convenience)."""
+def _ensure_features(candidates_path: Path):
     if not FEATURES_PATH.exists():
         print("[rank.py] structured_features.parquet not found — running parser now...")
         from src.parse import build_feature_table
@@ -32,44 +37,64 @@ def _ensure_artifacts(candidates_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Rank 100K candidates against Senior AI Engineer JD")
-    parser.add_argument("--candidates", required=True, type=Path,
-                        help="Path to candidates.jsonl (or .jsonl.gz)")
-    parser.add_argument("--out", required=True, type=Path,
-                        help="Output CSV path (e.g. submission.csv)")
-    parser.add_argument("--top-n", type=int, default=100,
-                        help="Number of candidates to rank (default: 100)")
+    parser.add_argument("--candidates", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--top-n", type=int, default=100)
     args = parser.parse_args()
 
     t0 = time.time()
 
     # ------------------------------------------------------------------ #
-    # 1. Load feature table (precomputed artifact)
+    # 1. Load feature table
     # ------------------------------------------------------------------ #
-    _ensure_artifacts(args.candidates)
-    print(f"[1/4] Loading feature table from {FEATURES_PATH}...")
+    _ensure_features(args.candidates)
+    print(f"[1/5] Loading feature table...")
     df = pd.read_parquet(FEATURES_PATH)
-    print(f"      {len(df):,} candidates loaded  ({time.time()-t0:.1f}s)")
+    candidate_ids = df["candidate_id"].tolist()
+    print(f"      {len(df):,} candidates  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 2. Score all candidates
+    # 2. FAISS shortlist (embedding similarity to JD)
     # ------------------------------------------------------------------ #
-    print("[2/4] Scoring candidates (MVP weighted-feature model)...")
+    use_embeddings = EMBEDDINGS_PATH.exists() and JD_EMBED_PATH.exists() and INDEX_PATH.exists()
+    cosine_sim_full = None
+
+    if use_embeddings:
+        print(f"[2/5] Loading embeddings and FAISS shortlist (k={SHORTLIST_K})...")
+        from src.index import load_index, retrieve_shortlist
+
+        jd_vec = np.load(JD_EMBED_PATH)
+        index  = load_index(INDEX_PATH)
+
+        shortlist_df = retrieve_shortlist(index, jd_vec, candidate_ids, k=SHORTLIST_K)
+
+        # Build full cosine_sim array aligned to df (zeros for non-shortlisted)
+        sim_map = dict(zip(shortlist_df["candidate_id"], shortlist_df["cosine_sim"]))
+        cosine_sim_full = np.array([sim_map.get(cid, 0.0) for cid in candidate_ids], dtype=np.float32)
+        print(f"      Shortlist: {len(shortlist_df):,} candidates  ({time.time()-t0:.1f}s)")
+    else:
+        print(f"[2/5] Embedding artifacts not found — using title heuristic (fallback)")
+
+    # ------------------------------------------------------------------ #
+    # 3. Score and rank
+    # ------------------------------------------------------------------ #
+    print(f"[3/5] Scoring candidates...")
     from src.score_mvp import rank_candidates
-    ranked = rank_candidates(df, top_n=args.top_n)
+    ranked = rank_candidates(df, cosine_sim=cosine_sim_full, top_n=args.top_n)
     print(f"      Top {args.top_n} selected  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 3. Generate template reasoning
+    # 4. Template reasoning
     # ------------------------------------------------------------------ #
-    print("[3/4] Generating reasoning strings...")
+    print(f"[4/5] Generating reasoning...")
     from src.reasoning import add_reasoning_column
     ranked = add_reasoning_column(ranked)
-    print(f"      Reasoning done  ({time.time()-t0:.1f}s)")
+    print(f"      Done  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 4. Write output CSV
+    # 5. Write and validate
     # ------------------------------------------------------------------ #
-    print(f"[4/4] Writing {args.out}...")
+    print(f"[5/5] Writing {args.out}...")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out = ranked[["candidate_id", "rank", "score", "reasoning"]]
     out.to_csv(args.out, index=False, encoding="utf-8")
@@ -79,8 +104,7 @@ def main():
     print("\nTop 5:")
     print(out.head(5).to_string(index=False))
 
-    # Validate
-    print("\n--- Running validator ---")
+    print("\n--- Validator ---")
     from India_runs_data_and_ai_challenge.validate_submission import validate_submission
     errors = validate_submission(args.out)
     if errors:
@@ -88,8 +112,7 @@ def main():
         for e in errors:
             print(f"  - {e}")
         sys.exit(1)
-    else:
-        print("Submission is valid.")
+    print("Submission is valid.")
 
 
 if __name__ == "__main__":

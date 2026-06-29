@@ -2,32 +2,33 @@
 MVP scoring: weighted feature scoring without OT or disqualifier-penalty.
 Produces a valid, submittable ranking for Days 1-2.
 
-Score formula:
+Score formula (Day 2+, with embeddings):
   score = (
-      w_domain  * domain_score        # title/industry fit
-    + w_career  * career_score        # product months, ML years
+      w_sem     * cosine_sim          # semantic similarity to JD (sentence-transformer)
+    + w_career  * career_score        # product months, ML years, structured signals
     + w_avail   * availability_score  # redrob signals
     + w_loc     * location_score      # location fit
   ) * plausibility_score ^ PLAUS_EXP
 
-domain_score is built entirely from structured fields (title, industry, skills weighted
-by proficiency × duration). No per-candidate LLM calls.
+Fallback (no embeddings): w_sem replaced by title+skill heuristic domain_score.
+No per-candidate LLM calls at any point.
 """
 
 from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# ---------- weights (MVP — tuned to JD calibration target) ----------
-W_DOMAIN    = 0.40   # title + skill relevance
-W_CAREER    = 0.35   # product company months, ML/AI years, shipped systems signal
+# ---------- weights (Day 2 with embeddings) ----------
+W_SEM       = 0.40   # semantic cosine sim to JD (replaces title heuristic)
+W_CAREER    = 0.35   # product company months, ML/AI years, structured signals
 W_AVAIL     = 0.15   # redrob availability signals
 W_LOC       = 0.10   # location fit
-PLAUS_EXP   = 0.40   # plausibility penalty exponent (higher = stronger honeypot penalty)
+PLAUS_EXP   = 0.40   # plausibility penalty exponent
 
 # JD experience range
 JD_YOE_MIN, JD_YOE_MAX = 5, 9
@@ -161,37 +162,44 @@ def _career_score(row: pd.Series) -> float:
     return min(1.0, score)
 
 
-def compute_scores(df: pd.DataFrame) -> pd.Series:
+def compute_scores(df: pd.DataFrame, cosine_sim: np.ndarray | None = None) -> pd.Series:
     """
     Vectorized MVP composite score for all candidates.
+
+    cosine_sim: precomputed float32 array of shape (len(df),) — cosine similarity
+                to the JD embedding for each candidate, aligned to df.index order.
+                If None, falls back to title-heuristic domain_score.
+
     Returns a Series aligned to df.index.
     """
-    domain  = df.apply(_domain_score, axis=1)
+    if cosine_sim is not None:
+        sem = pd.Series(cosine_sim, index=df.index).clip(0, 1)
+    else:
+        sem = df.apply(_domain_score, axis=1)
+
     career  = df.apply(_career_score, axis=1)
     avail   = df["availability_score"]
     loc     = df["location_score"]
     plaus   = df["plausibility_score"]
 
     raw = (
-        W_DOMAIN * domain
+        W_SEM    * sem
         + W_CAREER * career
         + W_AVAIL  * avail
         + W_LOC    * loc
     )
 
-    # Plausibility multiplier: score^0.4 so 0.4 plausibility → ×0.693, 1.0 → ×1.0
     score = raw * (plaus ** PLAUS_EXP)
-
     return score.round(6)
 
 
-def rank_candidates(df: pd.DataFrame, top_n: int = 100) -> pd.DataFrame:
+def rank_candidates(df: pd.DataFrame, cosine_sim: np.ndarray | None = None, top_n: int = 100) -> pd.DataFrame:
     """
     Return top_n candidates sorted by score DESC, then candidate_id ASC for ties.
     Scores are normalized to [0, 1] range and made strictly non-increasing per rank.
     """
     df = df.copy()
-    df["_raw_score"] = compute_scores(df)
+    df["_raw_score"] = compute_scores(df, cosine_sim=cosine_sim)
 
     # Sort: score DESC, candidate_id ASC (tie-break per validator spec)
     df_sorted = df.sort_values(["_raw_score", "candidate_id"], ascending=[False, True])
