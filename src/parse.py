@@ -388,6 +388,20 @@ def build_feature_table(candidates_path: Path, out_path: Path, verbose: bool = T
                 print(f"  Parsed {i + 1:,} candidates...")
 
     df = pd.DataFrame(rows)
+
+    # Sanity-check skills_json: every row must be valid JSON.
+    # If this fails, the bug is in _skill_features, not in downstream consumers.
+    import json as _json
+    def _is_bad_json(s):
+        try:
+            _json.loads(s)
+            return False
+        except Exception:
+            return True
+    bad = df["skills_json"].apply(_is_bad_json)
+    if bad.any():
+        raise ValueError(f"skills_json is malformed for {bad.sum()} rows — fix _skill_features")
+
     df.to_parquet(out_path, index=False, compression="snappy")
     if verbose:
         print(f"Feature table saved: {out_path}  ({len(df):,} rows, {df.shape[1]} cols)")

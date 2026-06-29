@@ -325,6 +325,39 @@ shortlist in ways SEM cosine alone doesn't capture. No weight change needed at D
 
 **Post-fix ranking:** 17.4s wall-clock, 11/11 tests pass, 0/43 honeypots in top 100 ✅.
 
+### 2026-06-29 — Pre-Day-5 silent-failure audit
+
+**Motivation:** The OT sinkhorn bug was a broad `except Exception` silently zeroing all
+OT scores for the entire run. The pipeline produced valid output, passed all tests, and
+looked correct — while doing something different from what the code claimed. The failure
+mode (broad catch → default value → no observable signal) is a pattern to audit for,
+not a one-off.
+
+**Files audited:** `src/score_mvp.py`, `src/disqualifier.py`, `src/ot_matching.py`,
+`src/parse.py`, `rank.py`, `src/reasoning.py`.
+
+**Exception-handling inventory (7 sites total):**
+
+| Site | Type | Was this a bug? | Resolution |
+|---|---|---|---|
+| `parse.py:_parse_date` | `except ValueError` | No — narrow, correct | Left as-is |
+| `score_mvp.py:_skill_relevance_score` | `except (JSONDecodeError, TypeError)` | No — defensive against missing skills | Added comment documenting why it's expected |
+| `ot_matching.py:_candidate_skill_weights` | `except (JSONDecodeError, TypeError)` | No — defensive against missing skills | Added comment |
+| `ot_matching.py:sinkhorn2 call` | `except Exception` | **YES — hid IndexError from POT API change** | **Removed entirely. ot.sinkhorn2 raises only for programmer errors (wrong shapes, non-simplex weights) — both of which we guard against. Let it propagate.** |
+| `ot_matching.py:build_skill_embedding_cache` | `except (JSONDecodeError, TypeError)` | No — defensive against missing skills | Added comment |
+| `reasoning.py:_top_relevant_skills` | `except (JSONDecodeError, TypeError)` | No — defensive against missing skills | Added comment |
+| `reasoning.py:_days_since_active` | `except ValueError` | No — narrow, correct | Left as-is |
+
+**The 4 `(JSONDecodeError, TypeError)` defensive catches:** all protect against
+`skills_json` being null or empty for candidates with no skills. The write path now has
+an assertion: `build_feature_table` in `parse.py` validates every row's `skills_json`
+round-trips through `json.loads` before writing the parquet. If `_skill_features` ever
+produces malformed JSON, the assert catches it at build time, not silently at read time.
+
+**Result:** 1 bug (broad catch hiding real error) → removed catch entirely. 4 legitimate
+defensive catches → documented. 2 narrow `ValueError` catches → left as-is. No silent
+failure paths remain in the scoring pipeline.
+
 ### 2026-06-28 — Step 0
 - Created PROJECT.md after reading all bundle files (docx via python-docx, schema, sample candidates, sample submission, validator)
 - Confirmed dataset structure directly from candidates.jsonl (not from prompt summary)

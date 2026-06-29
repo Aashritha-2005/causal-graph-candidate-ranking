@@ -39,6 +39,8 @@ def _candidate_skill_weights(skills_json: str) -> tuple[list[str], np.ndarray] |
     try:
         skills = json.loads(skills_json)
     except (json.JSONDecodeError, TypeError):
+        # Only reachable for null/empty skills_json (candidates with no skills listed).
+        # build_feature_table asserts valid JSON, so this is missing-data, not a bug.
         return None
 
     weights = []
@@ -133,20 +135,19 @@ def compute_ot_scores_from_skill_embeddings(
         # Sinkhorn distance.
         # POT >= 0.9 returns a scalar float; older versions returned a tuple.
         # We handle both to stay version-agnostic.
-        try:
-            raw = ot.sinkhorn2(
-                cand_w, jd_weights,
-                cost_matrix,
-                reg=SINKHORN_REG,
-                numItermax=SINKHORN_NUMITER,
-                warn=False,
-            )
-            dist = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
-            # Cost matrix values ∈ [0, 2]. Typical well-matched candidates have
-            # dist ≈ 0.5–0.8 (low-cost transport). Score = 1 - dist, clipped to [0,1].
-            ot_scores[i] = float(max(0.0, 1.0 - dist))
-        except Exception:
-            ot_scores[i] = 0.0
+        # No broad except: if ot.sinkhorn2 raises, let it propagate — we want to
+        # know immediately rather than silently zero scores for the whole run.
+        raw = ot.sinkhorn2(
+            cand_w, jd_weights,
+            cost_matrix,
+            reg=SINKHORN_REG,
+            numItermax=SINKHORN_NUMITER,
+            warn=False,
+        )
+        dist = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
+        # Cost matrix values ∈ [0, 2]. Typical well-matched candidates have
+        # dist ≈ 0.5–0.8 (low-cost transport). Score = 1 - dist, clipped to [0,1].
+        ot_scores[i] = float(max(0.0, 1.0 - dist))
 
     return ot_scores
 
@@ -167,6 +168,7 @@ def build_skill_embedding_cache(
                 if name:
                     unique_skills.add(name)
         except (json.JSONDecodeError, TypeError):
+            # Only reachable for null/empty skills_json rows; same guard as above.
             pass
 
     skill_list = sorted(unique_skills)

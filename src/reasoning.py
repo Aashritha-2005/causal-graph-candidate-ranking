@@ -20,6 +20,7 @@ def _top_relevant_skills(skills_json: str, n: int = 2) -> list[str]:
         skills = json.loads(skills_json)
         return [s["name"] for s in skills[:n] if s.get("name")]
     except (json.JSONDecodeError, TypeError):
+        # Only reachable for null/empty skills_json; build_feature_table asserts valid JSON.
         return []
 
 

@@ -87,6 +87,9 @@ def _skill_relevance_score(skills_json: str) -> float:
     try:
         skills = json.loads(skills_json)
     except (json.JSONDecodeError, TypeError):
+        # Only reachable if skills_json is null/empty for a candidate with no skills.
+        # build_feature_table asserts all skills_json values are valid JSON, so a
+        # decode error here means missing data, not a code bug.
         return 0.0
 
     total_weight = 0.0
