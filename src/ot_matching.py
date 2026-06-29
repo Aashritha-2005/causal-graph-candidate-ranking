@@ -130,17 +130,21 @@ def compute_ot_scores_from_skill_embeddings(
         cosine_sim_mat = cand_matrix @ jd_mat.T  # (n_cand_skills, n_jd_skills)
         cost_matrix = np.clip(1.0 - cosine_sim_mat, 0, 2)  # distance ∈ [0, 2]
 
-        # Sinkhorn distance
+        # Sinkhorn distance.
+        # POT >= 0.9 returns a scalar float; older versions returned a tuple.
+        # We handle both to stay version-agnostic.
         try:
-            dist = ot.sinkhorn2(
+            raw = ot.sinkhorn2(
                 cand_w, jd_weights,
                 cost_matrix,
                 reg=SINKHORN_REG,
                 numItermax=SINKHORN_NUMITER,
                 warn=False,
-            )[0]
-            # Normalize: max possible distance is 2.0 (orthogonal embeddings)
-            ot_scores[i] = float(max(0.0, 1.0 - dist / 1.0))
+            )
+            dist = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
+            # Cost matrix values ∈ [0, 2]. Typical well-matched candidates have
+            # dist ≈ 0.5–0.8 (low-cost transport). Score = 1 - dist, clipped to [0,1].
+            ot_scores[i] = float(max(0.0, 1.0 - dist))
         except Exception:
             ot_scores[i] = 0.0
 

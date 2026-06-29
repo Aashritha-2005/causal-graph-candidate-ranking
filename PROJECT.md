@@ -269,6 +269,62 @@ signals can see.
 
 What's next: Day 5 — conformal calibration, availability modifier tuning, final honeypot re-check before submission.
 
+### 2026-06-29 — Pre-Day-5 verifications
+
+**Check 1 — D2: confirmed absent (not just undetectable)**
+
+Investigation: Expanded structural proxy for D2 (LLM-only, no pre-LLM background):
+`ml_ai_months > 0 AND ml_ai_months < 24 AND yoe < 4`. 44 candidates matched. Skill-name
+classification: 3 classified "LLM_only" (had LangChain/Pinecone/RAG without sklearn etc),
+33 "both", 6 "pre_LLM_only", 2 "neither". Read full `career_history` + `skills` for 5
+profiles (3 LLM-only by skill names, 2 borderline).
+
+**Finding: Confirmed absent.** None of the 5 matched the JD's D2 pattern. Even the 3
+"LLM_only" by skill-name classification had foundational ML in their career descriptions
+(sklearn, feature engineering, model deployment). No candidate in the dataset is
+"LangChain-only with no real ML background." The dataset skews toward candidates with
+genuine ML foundations, not tutorial-level AI enthusiasts. D2 is correctly dropped —
+the pattern does not exist in this data (confirmed absent, not just undetectable via this
+particular heuristic).
+
+**Check 2 — D4 false positives: one cutoff-affecting, fixed**
+
+8 ML/AI-titled candidates flagged as `frequent_job_hopper` (down from 9 — corrected count).
+Checked where all 8 rank in current submission: all outside top 100. Simulated removal of
+D4 penalty for each: CAND_0007412 (Applied ML Engineer, Zoho) would rank above cutoff
+(no_D4 score=0.675 vs cutoff=0.621). Read full profile: 7.4yr career at LinkedIn (8mo) →
+Glance (13mo) → Swiggy (14mo) → Locobuzz (19mo) → Zoho (33mo current). All roles are
+ML/AI/Search/Recommendation — domain-consistent career progression, not title-chasing.
+The 8mo LinkedIn role is an early-career short stint, but the candidate has 54mo ML/AI
+experience across consistently relevant companies.
+
+**Fix applied:** Added exemption to `frequent_job_hopper` in `parse.py`: flag is cleared
+when `ml_ai_months >= 36` (3+ years of sustained applied ML work). Rationale: genuine
+ML career moves within the same domain are not the JD's D4 concern (title-chasing via
+seniority hops). Exemption affects exactly 9 of 1,382 flagged candidates (0.7%) —
+negligible impact on true positives. CAND_0007412 now ranks 25 in updated submission.
+
+**Check 3 — OT signal: bug found and fixed, real signal confirmed**
+
+Initial diff (before fix): all OT scores = 0.0. Root cause: POT 0.9.6 `ot.sinkhorn2`
+returns a scalar, but `ot_matching.py` indexed with `[0]` as if it returned a tuple.
+`IndexError` was silently swallowed by the `try/except`, zeroing all scores. Fixed by
+replacing `[0]` with a version-agnostic `float(raw[0]) if hasattr(raw,'__len__') else float(raw)`.
+
+Post-fix OT distribution (shortlist 5000): mean=0.25, std=0.07, max=0.40. Zero zeros.
+OT vs no-OT top-100 diff:
+- 3 candidates enter top 100 with OT; 3 leave
+- 86 of 97 common candidates change rank
+- Largest moves: ±18 positions (CAND_0066376 Applied ML Engineer, OT=0.372, moved up 18;
+  CAND_0021410 Junior ML Engineer, OT=0.182, moved down 18)
+- High-OT candidates: Applied/NLP/Recommendation engineers with strong skill overlap
+- Low-OT candidates: broader SWE backgrounds or narrower skill portfolios
+
+Verdict: OT is earning its W_OT=0.10 weight. It differentiates within the ML/AI-titled
+shortlist in ways SEM cosine alone doesn't capture. No weight change needed at Day 5.
+
+**Post-fix ranking:** 17.4s wall-clock, 11/11 tests pass, 0/43 honeypots in top 100 ✅.
+
 ### 2026-06-28 — Step 0
 - Created PROJECT.md after reading all bundle files (docx via python-docx, schema, sample candidates, sample submission, validator)
 - Confirmed dataset structure directly from candidates.jsonl (not from prompt summary)

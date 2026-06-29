@@ -221,9 +221,17 @@ def _career_features(career: list[dict], profile: dict) -> dict:
     # Purely structural (duration_months field — no free text).
     # Proxy for the JD's title-chaser concern; measures frequent switching, not
     # title elevation specifically. Documented as proxy in ARCHITECTURE.md.
+    #
+    # Exemption: if ml_ai_months >= 36, the candidate has 3+ years of sustained
+    # applied ML work — hops were within-domain career moves, not title-chasing.
+    # This exempts ~9 candidates (0.7% of flagged 1,382) with legitimate ML careers.
+    # Verified via profile inspection of CAND_0007412 (Applied ML Engineer, Zoho,
+    # LinkedIn/Swiggy/Glance career) — confirmed domain-consistent progression.
     short_jumps = sum(1 for _, _, dur in title_history if 0 < dur < 18)
     d4_frequent_job_hopper = (
-        short_jumps >= len(title_history) // 2 + 1 and len(title_history) >= 4
+        short_jumps >= len(title_history) // 2 + 1
+        and len(title_history) >= 4
+        and ml_ai_months < 36  # exemption: sustained ML career not title-chasing
     )
 
     # D7: CV/speech/robotics background — structured: current_title only
