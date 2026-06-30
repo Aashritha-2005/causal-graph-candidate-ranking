@@ -204,7 +204,7 @@ signals can see.
 3. **OT matrix dimension**: Sinkhorn on shortlist × JD skill-set. Need to benchmark cost at k=1000.
 4. **Participant ID for output filename**: not yet known — use `submission.csv` locally, rename before upload.
 5. **Conformal calibration reference set**: no labeled calibration set provided. Will use held-out shortlist candidates ranked by domain heuristics as pseudo-labels.
-6. **GNN**: stretch goal — first thing cut if behind schedule on Day 6.
+6. **GNN**: ~~stretch goal~~ **CUT (Day 6 decision, logged below).**
 
 ---
 
@@ -359,6 +359,43 @@ dict-lookup O(n+k) → <1s. Total wall-clock back to 17.0s.
 
 What's next: Day 7 — README repro command, submission_metadata.yaml, final validation,
 submit. Day 6 GNN stretch goal skipped per schedule.
+
+### 2026-06-29 — Day 6 decision: GNN layer cut
+
+**Decision:** Cut. Matches the roadmap's own stated contingency ("first thing cut if
+behind schedule"). This is a documented decision, not an accidental skip.
+
+**What GNN would have added (real signal gaps in the current pipeline):**
+- Company quality signal: graph edges between candidates and companies would let
+  reputation propagate — candidates at Flipkart/Meesho/Razorpay vs comparable-sounding
+  weaker companies could be distinguished. Currently all companies with similar titles
+  and durations look the same to the scorer.
+- Skill co-occurrence context: OT scores per-skill against the JD; a GNN could learn
+  that "FAISS + Sentence Transformers + RAG" is a more coherent cluster than
+  "FAISS + SQL + Photoshop" even if both match on the FAISS dimension.
+- Cross-candidate signal: candidates co-occurring with high-scoring peers at the same
+  companies or skill clusters would inherit relevance signal.
+
+**Why it's being cut:**
+1. All three gaps are marginal improvements within the shortlist, not retrieval failures.
+   The current top-10 already has ML/AI titles, 60-98 ml_ai_months at product companies,
+   high OT scores, India-based. The ordering is driven by legitimate signals.
+2. GNN without labeled data requires unsupervised pretraining (node2vec, GraphSAGE
+   reconstruction loss) — noisy signal, hard to validate, likely worse signal/noise
+   than the OT step added.
+3. Validation overhead is prohibitive at this stage. Every prior phase required at least
+   one round of auditing and correction (OT silent-zero bug, D4 false positive, circular
+   pseudo-labels, D1/D2 text-pattern resolution). GNN would require the same depth of
+   validation — graph construction, precompute extension, embedding integration, full
+   test suite, honeypot re-check — before being trustworthy. Adding it now means either
+   shipping it under-validated (lower standard than everything else) or consuming all
+   remaining time on validation rather than submission prep.
+4. The architecture's own rule: "first thing cut if behind schedule." This is the cut.
+
+**Remaining pipeline without GNN is complete and well-validated:**
+FAISS semantic shortlist → OT skill distribution matching → career quality features →
+disqualifier penalties → Platt score rescaling. All steps verified, zero silent failures,
+0/43 honeypots in top 100, 11/11 tests pass, 16.2s wall-clock.
 
 ### 2026-06-29 — Pre-Day-7 Day-5 audit
 
