@@ -121,15 +121,19 @@ def _career_score(row: pd.Series) -> float:
     """
     score = 0.0
 
-    # Years of experience fit (JD says 5-9, but explicitly not a hard cutoff)
+    # Years of experience fit (JD says 5-9, explicitly not a hard cutoff)
     yoe = row["yoe"]
+    ml_months = row["ml_ai_months"]
     if JD_YOE_MIN <= yoe <= JD_YOE_MAX:
         yoe_score = 1.0
     elif yoe < JD_YOE_MIN:
         yoe_score = yoe / JD_YOE_MIN
     else:
-        # Beyond 9yr — still fine, slight decay past 15yr
-        yoe_score = max(0.5, 1.0 - (yoe - JD_YOE_MAX) * 0.03)
+        # Beyond 9yr: decay, but reduced if candidate has substantial ML months.
+        # 80+ ml_ai_months means the "seniority" years are in-domain, not overhead.
+        base_decay = max(0.5, 1.0 - (yoe - JD_YOE_MAX) * 0.03)
+        ml_relief = min(0.15, (ml_months - 48) / 320)  # up to +0.15 for 96+ ml_months
+        yoe_score = min(1.0, base_decay + max(0.0, ml_relief))
     score += 0.20 * yoe_score
 
     # Product company months (JD explicitly rejects pure-services careers)
@@ -247,6 +251,37 @@ def rank_candidates(
     top["rank"] = range(1, top_n + 1)
 
     # Enforce non-increasing score (rounding can still create tiny inversions after re-sort)
+    for i in range(1, len(top)):
+        if top.loc[i, "score"] > top.loc[i - 1, "score"]:
+            top.loc[i, "score"] = top.loc[i - 1, "score"]
+
+    return top
+
+
+def rank_candidates_from_calibrated(
+    df: pd.DataFrame,
+    calibrated_scores: np.ndarray,
+    top_n: int = 100,
+) -> pd.DataFrame:
+    """
+    Rank using pre-computed calibrated scores (output of conformal.py).
+    Calibrated scores are already in [0, 1]; normalization stretches to [0.05, 1.0].
+    """
+    df = df.copy()
+    df["_raw_score"] = calibrated_scores
+
+    df_sorted = df.sort_values(["_raw_score", "candidate_id"], ascending=[False, True])
+    top = df_sorted.head(top_n).reset_index(drop=True)
+
+    # Normalize calibrated probs to [0.05, 1.0] for submission
+    max_s = top["_raw_score"].iloc[0]
+    min_s = top["_raw_score"].iloc[-1]
+    span = max_s - min_s if max_s > min_s else 1.0
+    top["score"] = ((top["_raw_score"] - min_s) / span * 0.95 + 0.05).round(4)
+
+    top = top.sort_values(["score", "candidate_id"], ascending=[False, True]).reset_index(drop=True)
+    top["rank"] = range(1, top_n + 1)
+
     for i in range(1, len(top)):
         if top.loc[i, "score"] > top.loc[i - 1, "score"]:
             top.loc[i, "score"] = top.loc[i - 1, "score"]

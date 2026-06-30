@@ -178,7 +178,7 @@ plausibility. The two highest-scoring detectable honeypots are the exact ones to
 | Day 1 MVP | title-heuristic domain_score | **0 / 43** | **Yes** (all = 1.0) | ✅ | Mechanism: title_score separation; highest-risk HP raw_scores 0.67–0.70 vs top-100 min ≈ 0.78 |
 | Day 2 | embedding cosine sim (FAISS k=5000) | **0 / 43** | **Yes** (all = 1.0) | ✅ | Highest-risk HPs: CAND_0093547 cosine_sim=0.70 (stayed out — career+plaus penalty sufficient); CAND_0019480 cosine_sim=0.62 (well clear) |
 | Days 3-4 | OT (Sinkhorn) + disqualifier-penalty | **0 / 43** | **Yes** (all = 1.0) | ✅ | CAND_0093547: not in top 100; CAND_0019480: not in top 100. Margin vs rank-100 measured. |
-| Day 5 | + conformal calibration | — | — | ❌ | Run again |
+| Day 5 | + Platt calibration, avail retune, YOE relief | **0 / 43** | **Yes** (all = 1.0) | ✅ | 0/43 in top 100, 0.0% rate, Stage 3 PASS. CAND_0039754 (false YOE-penalty) now rank 7. |
 
 Re-verification command: `python scripts/check_honeypots.py --sub submission.csv`
 
@@ -325,6 +325,39 @@ shortlist in ways SEM cosine alone doesn't capture. No weight change needed at D
 
 **Post-fix ranking:** 17.4s wall-clock, 11/11 tests pass, 0/43 honeypots in top 100 ✅.
 
+### 2026-06-29 — Day 5 complete
+
+**Availability modifier retuning (parse.py):**
+All top-50 candidates have `open_to_work=True`, so the 30% weight on that flag was
+not differentiating within the quality shortlist. Redistributed 5% to notice period
+(now 25%). Notice period is more discriminating for a fast-hiring JD: 15d vs 120d is
+material; open_to_work is nearly binary at the top. New weights: open_to_work 25%,
+recency 20%, recruiter_response 20%, notice_period 25%, interview_completion 10%.
+
+**YOE over-9yr penalty relief (score_mvp.py):**
+CAND_0039754 (Senior Applied Scientist, 16.2yr, 98 ml_ai_months) was at rank 15 before
+Day 5 despite cosine=0.724, which matches rank-1 quality. The decay formula
+`max(0.5, 1.0 - (yoe-9)*0.03)` gave 0.79 for 16yr regardless of ML months. Added
+ml_ai_relief: up to +0.15 for candidates with 96+ ml_ai_months, reducing the penalty
+when the extra years are clearly in-domain ML work. CAND_0039754 now rank 7.
+
+**Platt sigmoid calibration (src/conformal.py):**
+Fit logistic regression on shortlist pseudo-labels: top-500 (pseudo-relevant) vs
+bottom-500 (pseudo-irrelevant). Applies sigmoid to raw composite scores → calibrated
+probability of relevance. Effect: top-10 cluster near 1.0 (all high confidence), lower
+ranks spread out more. Normalized score distribution:
+- top-10 span: 0.2579 (was 0.3935 — top-10 compressed, they're all high-confidence)
+- 10-50 span: 0.3065 (was 0.2876 — more differentiation in the critical NDCG@50 zone)
+- 50-100 span: 0.3856 (was 0.2689 — borderline candidates clearly separated)
+
+**Performance fix:** `np.isin` on 100K string arrays was O(n×k) → 36s. Replaced with
+dict-lookup O(n+k) → <1s. Total wall-clock back to 17.0s.
+
+**Performance:** 17.0s total. Tests: 11/11 pass. Honeypots: 0/43 in top 100 ✅.
+
+What's next: Day 7 — README repro command, submission_metadata.yaml, final validation,
+submit. Day 6 GNN stretch goal skipped per schedule.
+
 ### 2026-06-29 — Pre-Day-5 silent-failure audit
 
 **Motivation:** The OT sinkhorn bug was a broad `except Exception` silently zeroing all
@@ -353,6 +386,9 @@ not a one-off.
 an assertion: `build_feature_table` in `parse.py` validates every row's `skills_json`
 round-trips through `json.loads` before writing the parquet. If `_skill_features` ever
 produces malformed JSON, the assert catches it at build time, not silently at read time.
+**Assumption: this guarantee holds only if `build_feature_table` remains the sole writer
+of `skills_json`. If any future script patches or regenerates that parquet column directly,
+re-verify all four catches — they would revert to hiding potential bugs.**
 
 **Result:** 1 bug (broad catch hiding real error) → removed catch entirely. 4 legitimate
 defensive catches → documented. 2 narrow `ValueError` catches → left as-is. No silent

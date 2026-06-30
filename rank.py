@@ -117,17 +117,35 @@ def main():
     print(f"      Done  ({time.time()-t0:.1f}s)")
 
     # ------------------------------------------------------------------ #
-    # 5. Composite score and rank
+    # 5. Raw composite scores + conformal calibration
     # ------------------------------------------------------------------ #
-    print(f"[5/6] Scoring and ranking...")
-    from src.score_mvp import rank_candidates
-    ranked = rank_candidates(
+    print(f"[5/6] Scoring, calibration, and ranking...")
+    from src.score_mvp import compute_scores, rank_candidates_from_calibrated
+
+    candidate_ids_arr = np.array(candidate_ids)
+    raw_scores = compute_scores(
         df,
         cosine_sim=cosine_sim_full,
         ot_scores=ot_score_full,
         disq_multiplier=disq_mult,
-        top_n=args.top_n,
-    )
+    ).values.astype(np.float32)
+
+    if shortlist_df is not None:
+        from src.conformal import calibrate_shortlist_scores
+        # Build O(1) lookup instead of O(n×k) np.isin on string arrays
+        id_to_idx = {cid: i for i, cid in enumerate(candidate_ids)}
+        shortlist_idx = np.array(
+            [id_to_idx[cid] for cid in shortlist_df["candidate_id"] if cid in id_to_idx],
+            dtype=np.intp,
+        )
+        calibrated_scores = calibrate_shortlist_scores(
+            raw_scores, shortlist_idx, top_k=500, bottom_k=500
+        )
+        print(f"      Calibrated  ({time.time()-t0:.1f}s)")
+    else:
+        calibrated_scores = raw_scores
+
+    ranked = rank_candidates_from_calibrated(df, calibrated_scores, top_n=args.top_n)
 
     from src.reasoning import add_reasoning_column
     ranked = add_reasoning_column(ranked)

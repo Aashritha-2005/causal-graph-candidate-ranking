@@ -124,25 +124,27 @@ def _availability_score(sig: dict) -> float:
     """
     score = 0.0
 
-    # Open to work: most direct signal
+    # Open to work: 25% (was 30%). Nearly all strong ML candidates have this set,
+    # so it's low-discrimination within the shortlist. Reallocated to notice period.
     if sig.get("open_to_work_flag", False):
-        score += 0.30
+        score += 0.25
 
-    # Recency: exponential decay, half-life ~90 days
+    # Recency: exponential decay over 180 days
     last_active = _parse_date(sig.get("last_active_date", ""))
     if last_active:
         days_since = (TODAY - last_active).days
-        score += 0.25 * max(0.0, 1.0 - days_since / 180)
+        score += 0.20 * max(0.0, 1.0 - days_since / 180)
 
-    # Recruiter response rate
+    # Recruiter response rate: unchanged
     rrr = float(sig.get("recruiter_response_rate", 0))
     score += 0.20 * rrr
 
-    # Notice period: 0 days = 1.0, 90 days = 0.5, 180 days = 0.0
+    # Notice period: 25% (was 15%). Fast-hire JD; ≤30d vs 90d is material.
+    # 0d = 1.0, 30d = 0.83, 60d = 0.67, 90d = 0.50, 180d = 0.0
     notice = int(sig.get("notice_period_days", 90))
-    score += 0.15 * max(0.0, 1.0 - notice / 180)
+    score += 0.25 * max(0.0, 1.0 - notice / 180)
 
-    # Interview completion
+    # Interview completion: unchanged
     icr = float(sig.get("interview_completion_rate", 0))
     score += 0.10 * icr
 
