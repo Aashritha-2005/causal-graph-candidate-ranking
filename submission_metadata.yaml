@@ -19,9 +19,9 @@ team_members:
 # ============================================================================
 # Code and reproducibility
 # ============================================================================
-github_repo: ""   # fill before portal upload
+github_repo: "https://github.com/Aashritha-2005/causal-graph-candidate-ranking"
 
-sandbox_link: ""  # fill before portal upload — see Day 7 sandbox section
+sandbox_link: "https://huggingface.co/spaces/Aashritha05/redrob-ranker"
 
 reproduce_command: "python rank.py --candidates ./India_runs_data_and_ai_challenge/candidates.jsonl --out ./submission.csv"
 
