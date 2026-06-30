@@ -1,0 +1,97 @@
+# Redrob Hackathon — Submission Metadata
+# Hack2Skill × Redrob AI — India.Runs Track 1
+
+# ============================================================================
+# Team identity
+# ============================================================================
+team_name: "causal-graph-candidate-ranking"
+
+primary_contact:
+  name: "Aashritha Lakshmi"
+  email: "varshaniharika0013@gmail.com"
+  phone: ""   # fill before portal upload
+
+team_members:
+  - name: "Aashritha Lakshmi"
+    email: "varshaniharika0013@gmail.com"
+    role: "Solo participant"
+
+# ============================================================================
+# Code and reproducibility
+# ============================================================================
+github_repo: ""   # fill before portal upload
+
+sandbox_link: ""  # fill before portal upload — see Day 7 sandbox section
+
+reproduce_command: "python rank.py --candidates ./India_runs_data_and_ai_challenge/candidates.jsonl --out ./submission.csv"
+
+# ============================================================================
+# Compute environment
+# ============================================================================
+compute:
+  platform: "MacBook Pro (Apple M-series, arm64)"
+  cpu_cores: 10
+  ram_gb: 16
+  python_version: "3.11.9"
+  os: "macOS 26.5.1"
+  uses_gpu_for_inference: false
+  has_network_during_ranking: false
+  pre_computation_required: true
+  pre_computation_time_minutes: 8   # scripts/precompute.py — one-time; no time limit
+  ranking_step_time_seconds: 17     # rank.py — within the 5-min budget
+
+# ============================================================================
+# AI tools declaration
+# ============================================================================
+ai_tools_used:
+  - "Claude (claude-sonnet-4-6) — architecture discussion, code review, debugging"
+
+ai_usage_summary: |
+  Claude (Anthropic claude-sonnet-4-6) was used throughout this project for:
+  - Architecture design and pre-code verification (candidate dataset spot-checks,
+    honeypot detectability measurement, disqualifier flag resolution)
+  - Code generation and iterative review across all phases (parse.py, score_mvp.py,
+    ot_matching.py, disqualifier.py, score_rescaling.py, rank.py, reasoning.py)
+  - Debugging (OT sinkhorn return-type bug, D4 false-positive, silent-exception audit)
+  - Documentation and changelog (PROJECT.md, ARCHITECTURE.md)
+
+  No candidate data was fed to any external LLM at ranking time. Zero network calls
+  during the ranking step. Reasoning strings are template-based from real structured
+  fields — no LLM-generated text in the output.
+
+# ============================================================================
+# Approach summary
+# ============================================================================
+methodology_summary: |
+  Multi-signal ranking pipeline with no LLM inference at ranking time.
+
+  Precompute (one-time, ~8 min): parse 100K candidates into a 45-column structured
+  feature table; embed candidate text and JD text with all-MiniLM-L6-v2 (384-dim);
+  build FAISS IndexFlatIP for cosine shortlisting.
+
+  Ranking step (~17 s): FAISS retrieves k=5000 shortlist → Sinkhorn optimal-transport
+  matches candidate skill distributions against the JD's 12-skill embedding matrix
+  (POT library, ε=0.05) → structural disqualifier penalties applied as soft multipliers
+  for JD's stated disqualifiers (frequent-hopper, pure-services, CV/speech, low GitHub)
+  → composite score (W_SEM=0.35, W_OT=0.10, W_CAREER=0.30, W_AVAIL=0.15, W_LOC=0.10)
+  multiplied by plausibility^0.40 → Platt sigmoid rescaling for score presentation
+  (monotone, preserves rank order) → template-based reasoning from structured fields.
+
+  Key design decisions: (1) plausibility_score catches ~43 of ~80 expected honeypots
+  via date-math and proficiency-duration mismatch; non-AI-title honeypots suppressed
+  naturally by domain scoring. (2) Disqualifier flags D1 and D2 dropped after measuring
+  0 candidates matched on 100K dataset. (3) D4 (frequent-hopper) exempts candidates
+  with ≥36 months applied ML, verified by profile inspection. (4) "Conformal
+  calibration" from original design was renamed to "Platt sigmoid score rescaling"
+  after confirming no held-out calibration set exists locally and the transform is
+  monotone (zero NDCG/MAP impact).
+
+# ============================================================================
+# Declarations
+# ============================================================================
+declarations:
+  read_submission_spec: true
+  code_is_original_work: true
+  no_collusion: true
+  honeypot_check_done: true    # scripts/check_honeypots.py; 0/43 in top 100, 0.0% rate
+  reproduction_tested: true

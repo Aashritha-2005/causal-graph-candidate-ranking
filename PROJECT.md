@@ -360,6 +360,58 @@ dict-lookup O(n+k) → <1s. Total wall-clock back to 17.0s.
 What's next: Day 7 — README repro command, submission_metadata.yaml, final validation,
 submit. Day 6 GNN stretch goal skipped per schedule.
 
+### 2026-06-29 — Day 7 complete
+
+**Pre-Day-7 confirmation (Check 1 follow-up):**
+Reviewed `sample_submission.csv` and `submission_spec.docx` for any held-out validation
+signal independent of the composite score. Spec states explicitly: "no public partition,
+no live leaderboard, no per-submission feedback during the competition." Sample
+submission contains fabricated uniform-decrement scores (0.992, 0.984, …) showing the
+keyword-stuffing failure mode — not relevance ground truth. Conclusion stands: no
+independent calibration signal exists locally. Check 1 finding confirmed as final.
+
+**README.md written:**
+- Single reproduce command documented; precompute time (8 min) separated from ranking
+  budget (17s)
+- Architecture diagram with honest component names (Sinkhorn OT, disqualifier-penalty
+  scoring, Platt sigmoid score rescaling — no overclaims)
+- Explicit table: original ARCHITECTURE.md names vs actual names with reasons for rename
+- GNN cut documented; honeypot handling, disqualifier flag table, D4 exemption explained
+- Dependencies and artifact sizes documented
+
+**submission_metadata.yaml filled in:**
+- Compute: 10 CPU cores, 16 GB RAM, Python 3.11.9, macOS arm64
+- ai_tools_used: Claude claude-sonnet-4-6, no candidate data fed to any LLM
+- methodology_summary: accurate ≤200-word description of actual pipeline
+- honeypot_check_done: true (0/43 in top 100)
+- reproduction_tested: true
+- github_repo and sandbox_link: fill before portal upload
+
+**Sandbox (sandbox/run_sandbox.py):**
+Runs end-to-end on ≤100-candidate JSON/JSONL sample without precomputed artifacts —
+embeddings computed on the fly. Tested on sample_candidates.json (50 candidates):
+12.3s, correct rank-1 result (CAND_0000031, Recommendation Systems Engineer). No
+FAISS index or parquet required for sandbox run.
+
+**Final dry-run on full candidates.jsonl:**
+Wall-clock: 16.5s. Peak RAM: 1.46 GB. Both within budget (5 min / 16 GB).
+Honeypot check: 0/43 in top 100, 0.0% rate, Stage 3 PASS.
+All 11 tests pass.
+Submission valid per validate_submission.py.
+
+**Git history:** 10 real incremental commits across all phases:
+df4a0b6 Day 1 MVP, 53fc116 format tests, 1fa2cae honeypot script,
+3ad612b honeypot measurement, 21bf0f9 Day 2 embeddings+FAISS,
+e785267 Days 3-4 OT+disqualifier, a58748d pre-Day-5 fixes,
+657e53b exception audit, f9695cd Day 5, 074e6e8 pre-Day-7 audit,
+52f0099 Day 6 cut decision → [this commit] Day 7.
+
+**Remaining before portal submission:**
+- Fill github_repo and sandbox_link in submission_metadata.yaml
+- Upload sandbox to HF Spaces or Colab (sandbox/run_sandbox.py is ready)
+- Portal upload of submission.csv
+- Max 3 submissions total; last valid submission counts
+
 ### 2026-06-29 — Day 6 decision: GNN layer cut
 
 **Decision:** Cut. Matches the roadmap's own stated contingency ("first thing cut if
