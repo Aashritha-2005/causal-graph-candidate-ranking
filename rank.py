@@ -119,7 +119,7 @@ def main():
     # ------------------------------------------------------------------ #
     # 5. Raw composite scores + conformal calibration
     # ------------------------------------------------------------------ #
-    print(f"[5/6] Scoring, calibration, and ranking...")
+    print(f"[5/6] Scoring, Platt rescaling, and ranking...")
     from src.score_mvp import compute_scores, rank_candidates_from_calibrated
 
     candidate_ids_arr = np.array(candidate_ids)
@@ -131,17 +131,18 @@ def main():
     ).values.astype(np.float32)
 
     if shortlist_df is not None:
-        from src.conformal import calibrate_shortlist_scores
+        from src.score_rescaling import apply_platt_rescaling
         # Build O(1) lookup instead of O(n×k) np.isin on string arrays
         id_to_idx = {cid: i for i, cid in enumerate(candidate_ids)}
         shortlist_idx = np.array(
             [id_to_idx[cid] for cid in shortlist_df["candidate_id"] if cid in id_to_idx],
             dtype=np.intp,
         )
-        calibrated_scores = calibrate_shortlist_scores(
+        # Platt sigmoid rescaling — monotonic, presentation-only (no rank changes)
+        calibrated_scores = apply_platt_rescaling(
             raw_scores, shortlist_idx, top_k=500, bottom_k=500
         )
-        print(f"      Calibrated  ({time.time()-t0:.1f}s)")
+        print(f"      Score rescaling done  ({time.time()-t0:.1f}s)")
     else:
         calibrated_scores = raw_scores
 

@@ -341,14 +341,16 @@ Day 5 despite cosine=0.724, which matches rank-1 quality. The decay formula
 ml_ai_relief: up to +0.15 for candidates with 96+ ml_ai_months, reducing the penalty
 when the extra years are clearly in-domain ML work. CAND_0039754 now rank 7.
 
-**Platt sigmoid calibration (src/conformal.py):**
-Fit logistic regression on shortlist pseudo-labels: top-500 (pseudo-relevant) vs
-bottom-500 (pseudo-irrelevant). Applies sigmoid to raw composite scores → calibrated
-probability of relevance. Effect: top-10 cluster near 1.0 (all high confidence), lower
-ranks spread out more. Normalized score distribution:
-- top-10 span: 0.2579 (was 0.3935 — top-10 compressed, they're all high-confidence)
-- 10-50 span: 0.3065 (was 0.2876 — more differentiation in the critical NDCG@50 zone)
-- 50-100 span: 0.3856 (was 0.2689 — borderline candidates clearly separated)
+**Platt sigmoid score rescaling (src/score_rescaling.py):**
+Fit logistic regression sigmoid on shortlist pseudo-labels (top-500 vs bottom-500 by
+composite score), then apply as a monotonic transform to all shortlist candidates.
+Effect: top candidates cluster near 1.0; tail candidates spread further apart. This is
+a presentation-only transform — rank order is preserved exactly.
+**Corrected (pre-Day-7 audit):** original description claimed "better NDCG@50 and MAP
+differentiation" — that was wrong. NDCG and MAP are rank-correlation metrics; a monotone
+transform that preserves rank order cannot affect them. Confirmed: zero rank changes,
+zero candidates entering/leaving top 100 before vs after sigmoid. The rescaling changes
+score spread for human readability, not ranking quality.
 
 **Performance fix:** `np.isin` on 100K string arrays was O(n×k) → 36s. Replaced with
 dict-lookup O(n+k) → <1s. Total wall-clock back to 17.0s.
@@ -357,6 +359,52 @@ dict-lookup O(n+k) → <1s. Total wall-clock back to 17.0s.
 
 What's next: Day 7 — README repro command, submission_metadata.yaml, final validation,
 submit. Day 6 GNN stretch goal skipped per schedule.
+
+### 2026-06-29 — Pre-Day-7 Day-5 audit
+
+**Check 1 — Circular pseudo-labels: confirmed, no independent signal available**
+
+The Platt sigmoid was fit on "top-500 vs bottom-500 by composite score" — the same
+composite score being rescaled. This is circular by construction: any monotonic sigmoid
+fit to self-referential rank positions will produce a sigmoid shape. No genuinely
+independent calibration signal exists locally:
+- domain_score (title+skill keyword heuristic) derives from the same feature space
+- plausibility_score is already a component of the composite
+- Redrob signals are already in the composite via availability_score
+- No labeled relevance data in the bundle; no external ground truth
+
+**Resolution:** Renamed `src/conformal.py` → `src/score_rescaling.py`. All references
+to "conformal calibration" removed from code, comments, and PROJECT.md. The step is
+now called "Platt sigmoid score rescaling" and explicitly documented as
+presentation-only. No refit performed (no independent signal to fit against).
+
+**Check 2 — NDCG/MAP improvement claim: incorrect, retracted**
+
+Verified directly: zero rank changes, zero candidates entering/leaving top 100 between
+raw scores and Platt-rescaled scores. The Day 5 summary claiming "better NDCG@50 and
+MAP differentiation" was wrong — NDCG and MAP are rank-correlation metrics; a monotone
+transform that preserves rank order cannot affect them. The rescaling changes score
+spread for submission presentation, not ranking quality.
+
+**Check 3 — "Conformal calibration" overclaim: renamed throughout**
+
+Renamed module, function names, step labels, PROJECT.md, all comments. This is the same
+overclaiming pattern as "causal debiasing" on Day 2. Now consistently called "Platt
+sigmoid score rescaling" or "monotonic score rescaling."
+
+**Check 4 — YOE relief false positives: none found**
+
+4 candidates with yoe > 9 in top-100:
+- CAND_0039754 (rank 7, relief=0.150): Meta → Apple Search & Ranking → Observe.AI.
+  Legitimate. 98 ml_ai_months, active applied science career, no D3/D6 flags.
+- CAND_0095619 (rank 38, relief=0.006): NLP Engineer at Nykaa, 50 ml_ai_months.
+  Relief is negligible (0.006). Rank driven by other signals.
+- CAND_0091534 (rank 66, relief=0.116): AI Engineer at Flipkart (52mo) → Adobe →
+  Glance. Skills: Sentence Transformers, RAG, Qdrant. Relevant. No stagnation.
+- CAND_0055992 (rank 99, relief=0.100): CRED → Observe.AI → Ola. FAISS + IR skills.
+  Active ML career. D4 exempted (ml_ai=80 >= 36). No D3/D6 flags.
+None show the JD's "tech-lead drift" pattern (pure architecture/no code).
+YOE relief as implemented is not introducing false positives.
 
 ### 2026-06-29 — Pre-Day-5 silent-failure audit
 
